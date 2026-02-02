@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "telegram-bot-python"
+version = "0.1.0"
+description = ""
+authors = ["aeither <36173828+aeither@users.noreply.github.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+pytelegrambotapi = "^4.21.0"
+python-dotenv = "^1.0.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
