@@ -4,6 +4,7 @@ import sqlite3
 import random
 import asyncio
 import logging
+from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
@@ -11,7 +12,8 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     filters,
-    ContextTypes
+    ContextTypes,
+    CallbackContext
 )
 
 # Load environment variables
@@ -49,6 +51,7 @@ def init_db():
             current_strike INTEGER DEFAULT 0,
             best_strike INTEGER DEFAULT 0,
             total_correct INTEGER DEFAULT 0,
+            games_played INTEGER DEFAULT 0,
             last_played TIMESTAMP
         )
     ''')
@@ -61,8 +64,7 @@ def init_db():
             character_id INTEGER NOT NULL,
             character_name TEXT NOT NULL,
             start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (character_id) REFERENCES characters (id),
-            FOREIGN KEY (user_id) REFERENCES users (user_id)
+            FOREIGN KEY (character_id) REFERENCES characters (id)
         )
     ''')
     
@@ -86,7 +88,7 @@ def add_character(name, image_path):
         conn.commit()
         return True
     except sqlite3.IntegrityError:
-        return False  # Already exists
+        return False
     finally:
         conn.close()
 
@@ -139,7 +141,8 @@ def get_user(user_id):
             'coins': 0,
             'current_strike': 0,
             'best_strike': 0,
-            'total_correct': 0
+            'total_correct': 0,
+            'games_played': 0
         }
     
     conn.close()
@@ -149,7 +152,8 @@ def get_user(user_id):
         'coins': user[2],
         'current_strike': user[3],
         'best_strike': user[4],
-        'total_correct': user[5]
+        'total_correct': user[5],
+        'games_played': user[6] or 0
     }
 
 def update_user(user_data):
@@ -164,6 +168,7 @@ def update_user(user_data):
             current_strike = ?,
             best_strike = ?,
             total_correct = ?,
+            games_played = ?,
             last_played = CURRENT_TIMESTAMP
         WHERE user_id = ?
     ''', (
@@ -172,6 +177,7 @@ def update_user(user_data):
         user_data['current_strike'],
         user_data['best_strike'],
         user_data['total_correct'],
+        user_data['games_played'],
         user_data['user_id']
     ))
     
@@ -227,6 +233,24 @@ def end_game(chat_id):
     conn.commit()
     conn.close()
 
+def get_top_users(limit=10):
+    """Get top users by coins"""
+    conn = sqlite3.connect('anime_bot.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT username, coins, best_strike, total_correct 
+        FROM users 
+        WHERE coins > 0 
+        ORDER BY coins DESC 
+        LIMIT ?
+    ''', (limit,))
+    
+    results = cursor.fetchall()
+    conn.close()
+    
+    return results
+
 # =============== GAME LOGIC ===============
 def calculate_coins(strike):
     """Calculate coins earned"""
@@ -236,63 +260,81 @@ def calculate_coins(strike):
     elif strike == 59: return 1000
     elif strike == 75: return 1200
     elif strike == 100: return 1500
-    elif strike % 10 == 0: return 100  # Every 10th strike
-    else: return 20  # Base reward
+    elif strike % 10 == 0: return 100
+    else: return 20
 
 def check_guess(user_guess, correct_name):
-    """Check if guess is correct (case-insensitive exact match)"""
+    """Check if guess is correct (case-insensitive)"""
     return user_guess.strip().lower() == correct_name.strip().lower()
 
 # =============== COMMAND HANDLERS ===============
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command - WITHOUT 's'"""
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /start command"""
     user = update.effective_user
-    user_data = get_user(user.id)
+    user_id = user.id
+    
+    print(f"\n🚀 /start command from {user_id}")
+    
+    user_data = get_user(user_id)
+    user_data['username'] = user.username or user.first_name
+    update_user(user_data)
     
     await update.message.reply_text(
         f"✨ Welcome {user.first_name} to Anime NGuess! ✨\n\n"
-        f"💰 <b>Coins:</b> {user_data['coins']}\n"
+        f"💰 <b>Your Coins:</b> {user_data['coins']}\n"
         f"🔥 <b>Current Strike:</b> {user_data['current_strike']}\n"
         f"🏆 <b>Best Strike:</b> {user_data['best_strike']}\n\n"
         f"🎮 <b>How to Play:</b>\n"
-        f"1. Use /splay to start game\n"
-        f"2. Guess the anime character name\n"
-        f"3. Earn coins and build your strike!\n\n"
-        f"🎯 <b>Commands:</b>\n"
-        f"• /splay - Start new game (30 seconds)\n"
-        f"• /sprofile - Check your stats\n"
+        f"1. Use /splay to start a game\n"
+        f"2. You'll see an anime character image\n"
+        f"3. Type the character name to guess\n"
+        f"4. Earn coins for correct guesses!\n\n"
+        f"⏱️ <b>Time Limit:</b> 30 seconds per round\n"
+        f"💰 <b>Coin Rewards:</b>\n"
+        f"• Base: 20 coins per correct guess\n"
+        f"• 10 strikes: 200 coins 🎉\n"
+        f"• 25 strikes: 500 coins 🌟\n"
+        f"• 50 strikes: 1000 coins ✨\n"
+        f"• 59 strikes: 1000 coins 🔥\n"
+        f"• 75 strikes: 1200 coins 💎\n"
+        f"• 100 strikes: 1500 coins 🏆\n\n"
+        f"📋 <b>Commands:</b>\n"
+        f"• /splay - Start new game\n"
+        f"• /sprofile - Your stats\n"
         f"• /sleaderboard - Top players\n"
-        f"• /sadd - Add character (Owner)\n"
-        f"• /slist - List all characters\n"
-        f"• /sdebug - Debug information",
+        f"• /sadd - Add character\n"
+        f"• /slist - All characters\n"
+        f"• /shelp - Show this help",
         parse_mode="HTML"
     )
 
-async def splay(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start a new game - WITH 's'"""
+async def splay_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /splay command"""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     
-    print(f"\n🎮 /splay called by {user_id} in chat {chat_id}")
+    print(f"\n🎮 /splay from user {user_id} in chat {chat_id}")
     
     # Check if game already active
     active_game = get_active_game(chat_id)
     if active_game:
-        print(f"❌ Game already active in chat {chat_id}")
-        await update.message.reply_text("⚠️ Game already running! Guess the character.")
+        print(f"❌ Game already active")
+        await update.message.reply_text("⚠️ A game is already running! Guess the character.")
         return
     
     # Get random character
     character = get_random_character()
     if not character:
-        await update.message.reply_text("❌ No characters added! Use /sadd first.")
+        print(f"❌ No characters in database")
+        await update.message.reply_text("❌ No characters added yet! Use /sadd to add characters.")
         return
     
-    print(f"✅ Selected character: '{character['name']}'")
+    print(f"✅ Character selected: '{character['name']}'")
     
     # Get user data
     user_data = get_user(user_id)
     user_data['username'] = update.effective_user.username or update.effective_user.first_name
+    user_data['games_played'] += 1
     
     # Start game in database
     start_game(chat_id, user_id, character)
@@ -301,195 +343,112 @@ async def splay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.reply_photo(
             photo=open(character['image_path'], 'rb'),
-            caption=f"🎮 <b>Guess this Anime Character!</b>\n"
-                   f"⏱️ <b>30 seconds</b>\n"
-                   f"🔥 <b>Your Strike:</b> {user_data['current_strike']}\n"
-                   f"💰 <b>Next Reward:</b> {calculate_coins(user_data['current_strike'] + 1)} coins",
+            caption=f"🎮 <b>Guess the Anime Character!</b>\n"
+                   f"⏱️ <b>30 seconds</b>\n\n"
+                   f"🔥 <b>Current Strike:</b> {user_data['current_strike']}\n"
+                   f"💰 <b>Next Reward:</b> {calculate_coins(user_data['current_strike'] + 1)} coins\n\n"
+                   f"💡 <i>Type the character name below...</i>",
             parse_mode="HTML"
         )
     except Exception as e:
         print(f"❌ Error sending image: {e}")
         end_game(chat_id)
-        await update.message.reply_text("❌ Error loading image!")
+        await update.message.reply_text(f"❌ Error loading image: {str(e)}")
         return
     
-    print(f"✅ Game started for chat {chat_id}")
+    # Save user data
+    update_user(user_data)
     
-    # 30-second timer
-    await asyncio.sleep(30)
+    print(f"✅ Game started successfully")
     
-    # Check if game still exists
-    active_game = get_active_game(chat_id)
-    if active_game:
-        print(f"⏰ Time's up for chat {chat_id}")
-        await context.bot.send_message(
-            chat_id,
-            f"⏰ <b>Time's up!</b>\n"
-            f"The character was: <b>{active_game['character_name']}</b>\n"
-            f"❌ <b>Strike reset to 0!</b>",
-            parse_mode="HTML"
-        )
-        # Reset user strike
-        user_data = get_user(user_id)
-        user_data['current_strike'] = 0
-        update_user(user_data)
-        end_game(chat_id)
+    # Set timeout task
+    async def timeout_game():
+        await asyncio.sleep(30)
+        
+        active_game = get_active_game(chat_id)
+        if active_game:
+            print(f"⏰ Timeout for chat {chat_id}")
+            await context.bot.send_message(
+                chat_id,
+                f"⏰ <b>Time's up!</b>\n"
+                f"The character was: <b>{active_game['character_name']}</b>\n"
+                f"❌ <b>Strike reset to 0!</b>",
+                parse_mode="HTML"
+            )
+            # Reset user strike
+            user_data = get_user(user_id)
+            user_data['current_strike'] = 0
+            update_user(user_data)
+            end_game(chat_id)
+    
+    # Run timeout in background
+    asyncio.create_task(timeout_game())
 
-# =============== MESSAGE HANDLER ===============
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle ALL incoming messages"""
-    # Check if message is a command
-    if update.message and update.message.text:
-        text = update.message.text
-        
-        # If it starts with '/', it's a command - let command handlers handle it
-        if text.startswith('/'):
-            return  # Let CommandHandler handle it
-        
-        # Otherwise, it's a guess - handle it here
-        await handle_guess(update, context)
-
-async def handle_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle user's guess"""
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-    user_guess = update.message.text.strip()
-    
-    print(f"\n🎯 Guess received in chat {chat_id}")
-    print(f"User {user_id} guessed: '{user_guess}'")
-    
-    # Get active game
-    active_game = get_active_game(chat_id)
-    if not active_game:
-        print(f"❌ No active game in chat {chat_id}")
-        return
-    
-    print(f"✅ Active game found! Answer: '{active_game['character_name']}'")
-    
-    # Check if correct user
-    if active_game['user_id'] != user_id:
-        print(f"❌ Wrong user. Game started by {active_game['user_id']}")
-        await update.message.reply_text("⚠️ This game was started by someone else!")
-        return
-    
-    # Check guess
-    if check_guess(user_guess, active_game['character_name']):
-        print(f"✅ CORRECT GUESS! '{user_guess}' == '{active_game['character_name']}'")
-        
-        # Get user data
-        user_data = get_user(user_id)
-        user_data['username'] = update.effective_user.username or update.effective_user.first_name
-        
-        # Update stats
-        new_strike = user_data['current_strike'] + 1
-        coins_earned = calculate_coins(new_strike)
-        
-        user_data['current_strike'] = new_strike
-        user_data['coins'] += coins_earned
-        user_data['total_correct'] += 1
-        
-        if new_strike > user_data['best_strike']:
-            user_data['best_strike'] = new_strike
-        
-        # Save user data
-        update_user(user_data)
-        
-        # End current game
-        end_game(chat_id)
-        
-        # Send success message
-        await update.message.reply_text(
-            f"✅ <b>Correct!</b> It was <b>{active_game['character_name']}</b>\n\n"
-            f"🔥 <b>New Strike:</b> {new_strike}\n"
-            f"💰 <b>+{coins_earned} coins!</b>\n"
-            f"💵 <b>Total Coins:</b> {user_data['coins']}\n\n"
-            f"🎮 <i>Next round in 3 seconds...</i>",
-            parse_mode="HTML"
-        )
-        
-        # Start next round
-        await asyncio.sleep(3)
-        await splay(update, context)
-        
-    else:
-        print(f"❌ WRONG GUESS! '{user_guess}' != '{active_game['character_name']}'")
-        
-        # Get user data
-        user_data = get_user(user_id)
-        user_data['current_strike'] = 0
-        update_user(user_data)
-        
-        # End game
-        end_game(chat_id)
-        
-        await update.message.reply_text(
-            f"❌ <b>Wrong!</b> The answer was: <b>{active_game['character_name']}</b>\n"
-            f"❌ <b>Strike reset to 0!</b>",
-            parse_mode="HTML"
-        )
-
-async def sprofile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show user profile - WITH 's'"""
+async def sprofile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /sprofile command"""
     user_id = update.effective_user.id
     user_data = get_user(user_id)
     
+    print(f"\n📊 /sprofile from user {user_id}")
+    
     await update.message.reply_text(
         f"📊 <b>Your Stats</b>\n\n"
+        f"👤 <b>Player:</b> {user_data['username']}\n"
         f"💰 <b>Coins:</b> {user_data['coins']}\n"
         f"🔥 <b>Current Strike:</b> {user_data['current_strike']}\n"
         f"🏆 <b>Best Strike:</b> {user_data['best_strike']}\n"
-        f"✅ <b>Correct Answers:</b> {user_data['total_correct']}\n\n"
-        f"🎁 <b>Milestone Rewards:</b>\n"
-        f"• 10 strikes: 200 coins 🎉\n"
-        f"• 25 strikes: 500 coins 🌟\n"
-        f"• 50 strikes: 1000 coins ✨\n"
-        f"• 59 strikes: 1000 coins 🔥\n"
-        f"• 75 strikes: 1200 coins 💎\n"
-        f"• 100 strikes: 1500 coins 🏆",
+        f"✅ <b>Correct Answers:</b> {user_data['total_correct']}\n"
+        f"🎮 <b>Games Played:</b> {user_data['games_played']}\n\n"
+        f"🎁 <b>Next Milestone:</b>\n",
         parse_mode="HTML"
     )
 
-async def sleaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show leaderboard - WITH 's'"""
-    conn = sqlite3.connect('anime_bot.db')
-    cursor = conn.cursor()
+async def sleaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /sleaderboard command"""
+    print(f"\n🏆 /sleaderboard command")
     
-    cursor.execute('''
-        SELECT username, coins, best_strike 
-        FROM users 
-        WHERE coins > 0 
-        ORDER BY coins DESC 
-        LIMIT 10
-    ''')
-    
-    top_users = cursor.fetchall()
-    conn.close()
+    top_users = get_top_users(10)
     
     if not top_users:
-        await update.message.reply_text("📊 No players yet!")
+        await update.message.reply_text("📊 No players yet! Be the first to play!")
         return
     
-    leaderboard = "🏆 <b>Top Players</b>\n\n"
-    medals = ["🥇", "🥈", "🥉", "4.", "5.", "6.", "7.", "8.", "9.", "10."]
+    leaderboard = "🏆 <b>Top 10 Players</b>\n\n"
     
-    for i, (username, coins, best_strike) in enumerate(top_users):
-        if i < 3:
-            leaderboard += f"{medals[i]} <b>{username or 'Player'}</b>\n"
-        else:
-            leaderboard += f"{medals[i]} {username or 'Player'}\n"
+    for i, (username, coins, best_strike, total_correct) in enumerate(top_users, 1):
+        medal = ""
+        if i == 1: medal = "🥇"
+        elif i == 2: medal = "🥈"
+        elif i == 3: medal = "🥉"
+        else: medal = f"{i}."
         
-        leaderboard += f"   💰 {coins} coins | 🔥 {best_strike} strikes\n\n"
+        display_name = username or f"Player{i}"
+        if len(display_name) > 15:
+            display_name = display_name[:12] + "..."
+        
+        leaderboard += f"{medal} <b>{display_name}</b>\n"
+        leaderboard += f"   💰 {coins} coins | 🔥 {best_strike} strikes | ✅ {total_correct}\n\n"
     
     await update.message.reply_text(leaderboard, parse_mode="HTML")
 
-async def sadd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Add new character - WITH 's'"""
+async def sadd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /sadd command"""
+    user_id = update.effective_user.id
+    owner_id = os.getenv("OWNER_ID")
+    
+    print(f"\n➕ /sadd from user {user_id}")
+    
+    # Check if user is owner
+    if not owner_id or str(user_id) != owner_id:
+        await update.message.reply_text("❌ Only the bot owner can add characters!")
+        return
+    
     if not context.args:
-        await update.message.reply_text("Reply to image: /sadd <character name>")
+        await update.message.reply_text("Usage: Reply to an image with /sadd <character name>")
         return
     
     if not update.message.reply_to_message or not update.message.reply_to_message.photo:
-        await update.message.reply_text("❌ Reply to an image!")
+        await update.message.reply_text("❌ Please reply to an image!")
         return
     
     char_name = " ".join(context.args).strip()
@@ -501,105 +460,176 @@ async def sadd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.reply_to_message.photo[-1]
     file = await photo.get_file()
     
-    # Save image
+    # Create safe filename
     safe_name = char_name.lower().replace(" ", "_").replace(".", "")
     image_path = f"images/{safe_name}.jpg"
-    await file.download_to_drive(image_path)
+    
+    try:
+        await file.download_to_drive(image_path)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error downloading image: {str(e)}")
+        return
     
     # Add to database
     success = add_character(char_name, image_path)
     
     if success:
         await update.message.reply_text(
-            f"✅ <b>Character Added!</b>\n"
+            f"✅ <b>Character Added Successfully!</b>\n\n"
             f"🎮 <b>Name:</b> {char_name}\n"
-            f"📁 <b>Saved as:</b> {image_path}",
+            f"📁 <b>Saved as:</b> {image_path}\n\n"
+            f"Now players can guess this character!",
             parse_mode="HTML"
         )
     else:
-        await update.message.reply_text("⚠️ Character already exists!")
+        await update.message.reply_text("⚠️ This character already exists!")
 
-async def slist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List all characters - WITH 's'"""
+async def slist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /slist command"""
+    print(f"\n📋 /slist command")
+    
     characters = get_all_characters()
     
     if not characters:
-        await update.message.reply_text("❌ No characters yet!")
+        await update.message.reply_text("❌ No characters added yet!")
         return
     
-    text = f"📋 <b>Characters ({len(characters)})</b>\n\n"
+    total = len(characters)
+    text = f"📋 <b>All Characters ({total})</b>\n\n"
+    
+    # Group by first letter
+    char_dict = {}
     for char in characters:
-        text += f"• {char}\n"
+        first_letter = char[0].upper()
+        if first_letter not in char_dict:
+            char_dict[first_letter] = []
+        char_dict[first_letter].append(char)
+    
+    for letter in sorted(char_dict.keys()):
+        text += f"<b>{letter}</b>\n"
+        for char in sorted(char_dict[letter]):
+            text += f"• {char}\n"
+        text += "\n"
     
     if len(text) > 4000:
-        text = text[:4000] + "\n..."
+        text = text[:4000] + "\n... (truncated)"
     
     await update.message.reply_text(text, parse_mode="HTML")
 
-async def sdebug(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Debug info - WITH 's'"""
-    chat_id = update.effective_chat.id
-    active_game = get_active_game(chat_id)
-    
-    conn = sqlite3.connect('anime_bot.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT COUNT(*) FROM characters')
-    char_count = cursor.fetchone()[0]
-    
-    cursor.execute('SELECT COUNT(*) FROM users')
-    user_count = cursor.fetchone()[0]
-    
-    cursor.execute('SELECT COUNT(*) FROM active_games')
-    active_count = cursor.fetchone()[0]
-    
-    conn.close()
-    
-    debug_text = (
-        f"🔧 <b>Debug Info</b>\n\n"
-        f"📊 Characters: {char_count}\n"
-        f"👥 Users: {user_count}\n"
-        f"🎮 Active Games: {active_count}\n"
-    )
-    
-    if active_game:
-        debug_text += f"\n🎯 Current Game:\n"
-        debug_text += f"Answer: '{active_game['character_name']}'\n"
-        debug_text += f"Started by: {active_game['user_id']}"
-    
-    await update.message.reply_text(debug_text, parse_mode="HTML")
+async def shelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /shelp command"""
+    await start_command(update, context)
 
-# =============== MAIN ===============
+# =============== MESSAGE HANDLER ===============
+async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle all text messages (guesses)"""
+    if not update.message or not update.message.text:
+        return
+    
+    text = update.message.text.strip()
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    
+    print(f"\n📨 Message received: '{text}' from {user_id} in {chat_id}")
+    
+    # Check if it's a command
+    if text.startswith('/'):
+        print(f"📝 It's a command, skipping...")
+        return
+    
+    # Check if there's an active game
+    active_game = get_active_game(chat_id)
+    if not active_game:
+        print(f"❌ No active game in this chat")
+        return
+    
+    print(f"✅ Active game found. Answer: '{active_game['character_name']}'")
+    
+    # Check if this user started the game
+    if active_game['user_id'] != user_id:
+        print(f"❌ Wrong user. Game started by {active_game['user_id']}")
+        await update.message.reply_text("⚠️ This game was started by someone else!")
+        return
+    
+    # Check the guess
+    if check_guess(text, active_game['character_name']):
+        print(f"✅ CORRECT! User guessed '{text}'")
+        
+        # Get and update user data
+        user_data = get_user(user_id)
+        user_data['username'] = update.effective_user.username or update.effective_user.first_name
+        
+        # Calculate new strike and coins
+        new_strike = user_data['current_strike'] + 1
+        coins_earned = calculate_coins(new_strike)
+        
+        user_data['current_strike'] = new_strike
+        user_data['coins'] += coins_earned
+        user_data['total_correct'] += 1
+        
+        # Update best strike
+        if new_strike > user_data['best_strike']:
+            user_data['best_strike'] = new_strike
+        
+        # Save user data
+        update_user(user_data)
+        
+        # End current game
+        end_game(chat_id)
+        
+        # Send success message
+        success_msg = f"✅ <b>Correct!</b> It was <b>{active_game['character_name']}</b>\n\n"
+        success_msg += f"🔥 <b>New Strike:</b> {new_strike}\n"
+        success_msg += f"💰 <b>+{coins_earned} coins!</b> Total: {user_data['coins']}\n"
+        
+        # Add milestone message
+        if new_strike in [10, 25, 50, 59, 75, 100]:
+            milestone_msgs = {
+                10: "🎉 10-STRIKE BONUS!",
+                25: "🌟 25-STRIKE BONUS!",
+                50: "✨ 50-STRIKE BONUS!",
+                59: "🔥 59-STRIKE SPECIAL!",
+                75: "💎 75-STRIKE BONUS!",
+                100: "🏆 100-STRIKE LEGEND!"
+            }
+            success_msg += f"\n{milestone_msgs[new_strike]}\n"
+        
+        success_msg += f"\n🎮 <i>Next round in 3 seconds...</i>"
+        
+        await update.message.reply_text(success_msg, parse_mode="HTML")
+        
+        # Start next round after delay
+        await asyncio.sleep(3)
+        await splay_command(update, context)
+        
+    else:
+        print(f"❌ WRONG! User guessed '{text}' but answer is '{active_game['character_name']}'")
+        
+        # Reset user strike
+        user_data = get_user(user_id)
+        user_data['current_strike'] = 0
+        update_user(user_data)
+        
+        # End game
+        end_game(chat_id)
+        
+        await update.message.reply_text(
+            f"❌ <b>Wrong!</b> The answer was: <b>{active_game['character_name']}</b>\n"
+            f"❌ <b>Strike reset to 0!</b>\n\n"
+            f"Use /splay to start a new game!",
+            parse_mode="HTML"
+        )
+
+# =============== MAIN FUNCTION ===============
 def main():
     """Start the bot"""
     token = os.getenv("BOT_TOKEN")
     if not token:
-        print("❌ BOT_TOKEN not set!")
+        print("❌ ERROR: BOT_TOKEN not set in environment variables!")
         return
     
-    print("🚀 Anime NGuess Bot Starting...")
+    print("🚀 Starting Anime NGuess Bot...")
+    print(f"📱 Token: {token[:10]}...")
     
     # Create application
-    application = Application.builder().token(token).build()
-    
-    # Add command handlers
-    application.add_handler(CommandHandler("start", start))  # WITHOUT 's'
-    application.add_handler(CommandHandler("splay", splay))  # WITH 's'
-    application.add_handler(CommandHandler("sprofile", sprofile))  # WITH 's'
-    application.add_handler(CommandHandler("sleaderboard", sleaderboard))  # WITH 's'
-    application.add_handler(CommandHandler("sadd", sadd))  # WITH 's'
-    application.add_handler(CommandHandler("slist", slist))  # WITH 's'
-    application.add_handler(CommandHandler("sdebug", sdebug))  # WITH 's'
-    
-    # =============== FIXED MESSAGE HANDLER ===============
-    # Add message handler to catch ALL non-command messages
-    application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND, 
-        handle_message
-    ))
-    
-    print("✅ Bot is running with proper message handler...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-if __name__ == "__main__":
-    main()
+ 
