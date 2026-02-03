@@ -4,7 +4,6 @@ import sqlite3
 import random
 import asyncio
 import logging
-from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
@@ -245,8 +244,8 @@ def check_guess(user_guess, correct_name):
     return user_guess.strip().lower() == correct_name.strip().lower()
 
 # =============== COMMAND HANDLERS ===============
-async def sstart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command"""
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITHOUT 's'
+    """Start command - WITHOUT 's' prefix"""
     user = update.effective_user
     user_data = get_user(user.id)
     
@@ -255,18 +254,22 @@ async def sstart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💰 <b>Coins:</b> {user_data['coins']}\n"
         f"🔥 <b>Current Strike:</b> {user_data['current_strike']}\n"
         f"🏆 <b>Best Strike:</b> {user_data['best_strike']}\n\n"
-        f"🎮 <b>Commands:</b>\n"
-        f"/splay - Start game (30 seconds)\n"
-        f"/sprofile - Your stats\n"
-        f"/sleaderboard - Top players\n"
-        f"/sadd - Add character\n"
-        f"/slist - List characters\n"
-        f"/sdebug - Debug info",
+        f"🎮 <b>How to Play:</b>\n"
+        f"1. Use /splay to start game\n"
+        f"2. Guess the anime character name\n"
+        f"3. Earn coins and build your strike!\n\n"
+        f"🎯 <b>Commands:</b>\n"
+        f"• /splay - Start new game (30 seconds)\n"
+        f"• /sprofile - Check your stats\n"
+        f"• /sleaderboard - Top players\n"
+        f"• /sadd - Add character (Owner)\n"
+        f"• /slist - List all characters\n"
+        f"• /sdebug - Debug information",
         parse_mode="HTML"
     )
 
-async def splay(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start a new game"""
+async def splay(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
+    """Start a new game - WITH 's' prefix"""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     
@@ -411,8 +414,8 @@ async def handle_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-async def sprofile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show user profile"""
+async def sprofile(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
+    """Show user profile - WITH 's' prefix"""
     user_id = update.effective_user.id
     user_data = get_user(user_id)
     
@@ -421,12 +424,19 @@ async def sprofile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💰 <b>Coins:</b> {user_data['coins']}\n"
         f"🔥 <b>Current Strike:</b> {user_data['current_strike']}\n"
         f"🏆 <b>Best Strike:</b> {user_data['best_strike']}\n"
-        f"✅ <b>Correct Answers:</b> {user_data['total_correct']}",
+        f"✅ <b>Correct Answers:</b> {user_data['total_correct']}\n\n"
+        f"🎁 <b>Milestone Rewards:</b>\n"
+        f"• 10 strikes: 200 coins 🎉\n"
+        f"• 25 strikes: 500 coins 🌟\n"
+        f"• 50 strikes: 1000 coins ✨\n"
+        f"• 59 strikes: 1000 coins 🔥\n"
+        f"• 75 strikes: 1200 coins 💎\n"
+        f"• 100 strikes: 1500 coins 🏆",
         parse_mode="HTML"
     )
 
-async def sleaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show leaderboard"""
+async def sleaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
+    """Show leaderboard - WITH 's' prefix"""
     conn = sqlite3.connect('anime_bot.db')
     cursor = conn.cursor()
     
@@ -458,8 +468,8 @@ async def sleaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(leaderboard, parse_mode="HTML")
 
-async def sadd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Add new character"""
+async def sadd(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
+    """Add new character - WITH 's' prefix"""
     if not context.args:
         await update.message.reply_text("Reply to image: /sadd <character name>")
         return
@@ -495,8 +505,8 @@ async def sadd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("⚠️ Character already exists!")
 
-async def slist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List all characters"""
+async def slist(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
+    """List all characters - WITH 's' prefix"""
     characters = get_all_characters()
     
     if not characters:
@@ -512,8 +522,8 @@ async def slist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(text, parse_mode="HTML")
 
-async def sdebug(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Debug info"""
+async def sdebug(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
+    """Debug info - WITH 's' prefix"""
     chat_id = update.effective_chat.id
     active_game = get_active_game(chat_id)
     
@@ -559,13 +569,13 @@ def main():
     application = Application.builder().token(token).build()
     
     # Add command handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("splay", splay))
-    application.add_handler(CommandHandler("sprofile", sprofile))
-    application.add_handler(CommandHandler("sleaderboard", sleaderboard))
-    application.add_handler(CommandHandler("sadd", sadd))
-    application.add_handler(CommandHandler("slist", slist))
-    application.add_handler(CommandHandler("sdebug", sdebug))
+    application.add_handler(CommandHandler("start", start))  # WITHOUT 's'
+    application.add_handler(CommandHandler("splay", splay))  # WITH 's'
+    application.add_handler(CommandHandler("sprofile", sprofile))  # WITH 's'
+    application.add_handler(CommandHandler("sleaderboard", sleaderboard))  # WITH 's'
+    application.add_handler(CommandHandler("sadd", sadd))  # WITH 's'
+    application.add_handler(CommandHandler("slist", slist))  # WITH 's'
+    application.add_handler(CommandHandler("sdebug", sdebug))  # WITH 's'
     
     # Add message handler for guesses
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_guess))
