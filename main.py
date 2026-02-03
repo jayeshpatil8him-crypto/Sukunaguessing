@@ -26,202 +26,208 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================= GAME VARIABLES =================
-game_sessions = {}
+game_sessions = {}  # chat_id -> {"answer": "name", "user_id": 123}
 # ==================================================
-
-# -------- DEBUG HELPER --------
-def debug_info(chat_id, guess, correct):
-    """Print debug info to console"""
-    print("\n" + "="*50)
-    print("🎯 DEBUG INFO:")
-    print(f"Chat ID: {chat_id}")
-    print(f"User Guess: '{guess}'")
-    print(f"Correct Answer: '{correct}'")
-    print(f"Guess Type: {type(guess)}")
-    print(f"Correct Type: {type(correct)}")
-    print(f"Guess Lower: '{guess.lower().strip()}'")
-    print(f"Correct Lower: '{correct.lower().strip()}'")
-    print(f"Are they equal? {guess.lower().strip() == correct.lower().strip()}")
-    print("="*50 + "\n")
 
 # -------- DATA HELPERS --------
 def load_data():
-    """Load character data and print debug info"""
+    """Load character data"""
     DATA_FILE = "data.json"
     if not os.path.exists(DATA_FILE):
-        print(f"❌ {DATA_FILE} not found!")
         return {"characters": []}
-    
     with open(DATA_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    
-    print(f"\n📁 Loaded {len(data['characters'])} characters from {DATA_FILE}:")
-    for i, char in enumerate(data["characters"], 1):
-        print(f"{i}. Name: '{char['name']}', Image: '{char['image']}'")
-    
-    return data
+        return json.load(f)
 
 def save_data(data):
     with open("data.json", "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
-    print(f"💾 Saved {len(data['characters'])} characters to data.json")
 
 def get_random_character():
     data = load_data()
     if not data["characters"]:
-        print("❌ No characters in database!")
         return None
-    
-    char = random.choice(data["characters"])
-    print(f"🎲 Selected random character: '{char['name']}'")
-    return char
+    return random.choice(data["characters"])
 
 # -------- SIMPLE MATCHING --------
 def is_correct_guess(guess, correct_answer):
-    """SUPER SIMPLE matching for testing"""
-    # Basic cleaning
-    user_guess = str(guess).lower().strip()
-    correct = str(correct_answer).lower().strip()
+    """Simple case-insensitive matching with word checking"""
+    # Convert to strings and clean
+    guess_str = str(guess).strip()
+    correct_str = str(correct_answer).strip()
     
-    # Remove extra spaces
-    user_guess = re.sub(r'\s+', ' ', user_guess)
-    correct = re.sub(r'\s+', ' ', correct)
+    # Convert to lowercase
+    guess_lower = guess_str.lower()
+    correct_lower = correct_str.lower()
     
     # Remove punctuation
-    user_guess = re.sub(r'[^\w\s]', '', user_guess)
-    correct = re.sub(r'[^\w\s]', '', correct)
+    guess_clean = re.sub(r'[^\w\s]', '', guess_lower)
+    correct_clean = re.sub(r'[^\w\s]', '', correct_lower)
     
-    print(f"\n🔍 MATCHING CHECK:")
-    print(f"User Guess (cleaned): '{user_guess}'")
-    print(f"Correct (cleaned): '{correct}'")
-    print(f"Exact match? {user_guess == correct}")
+    # DEBUG: Print what we're comparing
+    print(f"\n🔍 MATCHING DEBUG:")
+    print(f"Raw guess: '{guess_str}'")
+    print(f"Raw correct: '{correct_str}'")
+    print(f"Clean guess: '{guess_clean}'")
+    print(f"Clean correct: '{correct_clean}'")
     
-    # Direct match
-    if user_guess == correct:
-        print("✅ MATCH FOUND: Exact match!")
+    # 1. Exact match (after cleaning)
+    if guess_clean == correct_clean:
+        print("✅ Exact match!")
         return True
     
-    # Check if any word matches
-    guess_words = user_guess.split()
-    correct_words = correct.split()
+    # 2. Check if any word matches
+    guess_words = guess_clean.split()
+    correct_words = correct_clean.split()
     
-    for g_word in guess_words:
-        for c_word in correct_words:
-            if g_word == c_word:
-                print(f"✅ MATCH FOUND: Word '{g_word}' matches!")
-                return True
+    for word in guess_words:
+        if word in correct_words:
+            print(f"✅ Word match: '{word}' found in correct answer")
+            return True
     
-    print("❌ NO MATCH FOUND")
+    # 3. Check if correct words are in guess
+    for word in correct_words:
+        if word in guess_words:
+            print(f"✅ Word match: '{word}' found in guess")
+            return True
+    
+    print("❌ No match found")
     return False
 
 # -------- COMMAND HANDLERS --------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "🎮 Anime Guess Bot (Debug Mode)\n\n"
+        "🎮 Anime Guess Bot\n\n"
+        "Guess the anime character in 15 seconds!\n\n"
         "Commands:\n"
-        "/play - Start game\n"
-        "/add - Add character\n"
-        "/list - List all characters\n"
-        "/debug - Show current game\n"
-        "/test <name> - Test matching"
+        "/play - Start new game\n"
+        "/add <name> - Add character (reply to image)\n"
+        "/list - Show all characters\n"
+        "/test <name> - Test name matching"
     )
 
 async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     
+    # Check if game already running
     if chat_id in game_sessions:
-        await update.message.reply_text("Game already running!")
+        await update.message.reply_text("⚠️ Game already running! Guess or wait for timeout.")
         return
     
+    # Get random character
     character = get_random_character()
     if not character:
-        await update.message.reply_text("No characters! Use /add first.")
+        await update.message.reply_text("❌ No characters! Use /add to add some first.")
         return
     
+    # Store game session
     game_sessions[chat_id] = {
         "answer": character["name"],
-        "image": character["image"],
-        "active": True
+        "user_id": update.effective_user.id
     }
     
-    print(f"\n🎮 NEW GAME STARTED:")
-    print(f"Chat ID: {chat_id}")
-    print(f"Answer: '{character['name']}'")
-    print(f"Image: '{character['image']}'")
+    print(f"\n🎮 GAME STARTED:")
+    print(f"Chat: {chat_id}")
+    print(f"Answer stored: '{character['name']}'")
+    print(f"Image: {character['image']}")
     
+    # Send image
     try:
-        await update.message.reply_photo(
-            photo=open(character["image"], "rb"),
-            caption=f"Guess this character!\n⏱️ 15 seconds\n\n"
-                   f"Answer stored: '{character['name']}'"
-        )
+        if os.path.exists(character["image"]):
+            await update.message.reply_photo(
+                photo=open(character["image"], "rb"),
+                caption="🎮 Guess this character!\n⏱️ You have 15 seconds!\n\n"
+                       f"💡 Hint: Name has {len(character['name'].split())} word(s)"
+            )
+        else:
+            await update.message.reply_text(f"❌ Image not found: {character['image']}")
+            game_sessions.pop(chat_id, None)
+            return
     except Exception as e:
-        print(f"❌ Error sending photo: {e}")
-        await update.message.reply_text(f"Error: {e}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+        game_sessions.pop(chat_id, None)
         return
     
-    # Timer
+    # 15-second timer
     await asyncio.sleep(15)
     
-    if chat_id in game_sessions and game_sessions[chat_id]["active"]:
+    # Check if game is still active
+    if chat_id in game_sessions:
+        answer = game_sessions[chat_id]["answer"]
         game_sessions.pop(chat_id, None)
-        await context.bot.send_message(chat_id, "⏰ Time's up!")
+        await context.bot.send_message(
+            chat_id,
+            f"⏰ Time's up! The answer was: {answer}"
+        )
 
 async def check_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+    user_guess = update.message.text
     
+    # Check if game is active in this chat
     if chat_id not in game_sessions:
+        print(f"❌ No active game in chat {chat_id}")
         return
     
-    guess = update.message.text
-    correct = game_sessions[chat_id]["answer"]
+    # Get correct answer
+    correct_answer = game_sessions[chat_id]["answer"]
     
-    # Debug output
-    debug_info(chat_id, guess, correct)
+    print(f"\n🎯 GUESS ATTEMPT:")
+    print(f"Chat: {chat_id}")
+    print(f"User guess: '{user_guess}'")
+    print(f"Correct answer: '{correct_answer}'")
     
-    if is_correct_guess(guess, correct):
+    # Check if guess is correct
+    if is_correct_guess(user_guess, correct_answer):
+        # Correct guess!
         game_sessions.pop(chat_id, None)
-        await update.message.reply_text(f"✅ Correct! It was '{correct}'!")
+        await update.message.reply_text(
+            f"✅ Correct! It was: {correct_answer}\n\n"
+            f"Starting next round..."
+        )
+        # Start next round after delay
         await asyncio.sleep(2)
         await play(update, context)
     else:
+        # Wrong guess - give hint
+        first_letter = correct_answer[0].upper()
         await update.message.reply_text(
-            f"❌ Wrong! The answer was '{correct}'\n"
-            f"Your guess: '{guess}'"
+            f"❌ Wrong guess! Try again.\n"
+            f"💡 Hint: Name starts with '{first_letter}'"
         )
 
 async def addcharacter(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Simple add character command"""
+    """Add new character - reply to image with /add <name>"""
     if not context.args:
-        await update.message.reply_text("Usage: /add <name> (reply to image)")
+        await update.message.reply_text("Usage: Reply to an image with:\n/add <character name>")
         return
     
     if not update.message.reply_to_message or not update.message.reply_to_message.photo:
-        await update.message.reply_text("Reply to an image!")
+        await update.message.reply_text("❌ Please reply to an image!")
         return
     
-    char_name = " ".join(context.args)
+    char_name = " ".join(context.args).strip()
     
-    # Create images folder
+    # Create images directory
     os.makedirs("images", exist_ok=True)
     
     # Download image
     photo = update.message.reply_to_message.photo[-1]
     file = await photo.get_file()
     
-    # Simple filename
-    safe_name = char_name.lower().replace(" ", "_").replace(".", "")
+    # Create filename
+    safe_name = char_name.lower().replace(" ", "_")
+    safe_name = re.sub(r'[^\w_]', '', safe_name)  # Remove special chars
     image_path = f"images/{safe_name}.jpg"
     
     await file.download_to_drive(image_path)
     
-    # Load and update data
+    # Load existing data
     data = load_data()
     
-    # Check for duplicates
+    # Check for duplicates (case-insensitive)
     for char in data["characters"]:
         if char["name"].lower() == char_name.lower():
-            await update.message.reply_text("Already exists!")
+            await update.message.reply_text(f"⚠️ '{char_name}' already exists!")
             return
     
     # Add new character
@@ -233,43 +239,36 @@ async def addcharacter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_data(data)
     
     await update.message.reply_text(
-        f"✅ Added: '{char_name}'\n"
-        f"Saved as: {image_path}\n"
+        f"✅ Character added!\n"
+        f"Name: {char_name}\n"
+        f"Image: {image_path}\n"
         f"Total characters: {len(data['characters'])}"
     )
+    
+    print(f"\n➕ CHARACTER ADDED:")
+    print(f"Name: '{char_name}'")
+    print(f"Image: {image_path}")
 
 async def listcharacters(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all characters"""
     data = load_data()
     
     if not data["characters"]:
-        await update.message.reply_text("No characters yet!")
+        await update.message.reply_text("No characters yet! Use /add to add some.")
         return
     
-    text = "📋 All Characters:\n\n"
+    text = f"📋 Total Characters: {len(data['characters'])}\n\n"
     for i, char in enumerate(data["characters"], 1):
         text += f"{i}. {char['name']}\n"
-        text += f"   Image: {char['image']}\n\n"
     
-    await update.message.reply_text(text[:4000])  # Telegram limit
-
-async def debugcmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Debug current game"""
-    chat_id = update.effective_chat.id
+    # Telegram has 4096 char limit
+    if len(text) > 4000:
+        text = text[:4000] + "\n... (truncated)"
     
-    if chat_id in game_sessions:
-        game = game_sessions[chat_id]
-        await update.message.reply_text(
-            f"🔧 DEBUG INFO:\n"
-            f"Answer: '{game['answer']}'\n"
-            f"Image: {game['image']}\n"
-            f"Active: {game['active']}"
-        )
-    else:
-        await update.message.reply_text("No active game in this chat")
+    await update.message.reply_text(text)
 
 async def testmatch(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Test matching with a name"""
+    """Test name matching"""
     if not context.args:
         await update.message.reply_text("Usage: /test <name>")
         return
@@ -283,40 +282,62 @@ async def testmatch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     results = []
     for char in data["characters"]:
-        match = is_correct_guess(test_name, char["name"])
-        results.append(f"{char['name']}: {'✅' if match else '❌'}")
+        if is_correct_guess(test_name, char["name"]):
+            results.append(f"✅ {char['name']}")
+        else:
+            results.append(f"❌ {char['name']}")
     
-    await update.message.reply_text(
-        f"Testing: '{test_name}'\n\n" +
-        "\n".join(results)
-    )
+    response = f"Testing: '{test_name}'\n\n" + "\n".join(results)
+    
+    # Truncate if too long
+    if len(response) > 4000:
+        response = response[:4000] + "\n... (truncated)"
+    
+    await update.message.reply_text(response)
+
+async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show debug info about current game"""
+    chat_id = update.effective_chat.id
+    
+    if chat_id in game_sessions:
+        game = game_sessions[chat_id]
+        await update.message.reply_text(
+            f"🔧 Debug Info:\n"
+            f"Answer: '{game['answer']}'\n"
+            f"User ID: {game['user_id']}\n"
+            f"Active games: {len(game_sessions)}"
+        )
+    else:
+        await update.message.reply_text("No active game in this chat")
 
 def main() -> None:
+    """Start the bot"""
     token = os.getenv("BOT_TOKEN")
     if not token:
-        print("❌ BOT_TOKEN not set!")
+        logger.error("❌ BOT_TOKEN not set!")
         return
     
-    print("🚀 Starting Debug Bot...")
-    print(f"Token starts with: {token[:10]}...")
+    print("🚀 Starting Anime Guess Bot...")
     
     # Load data at startup
-    load_data()
+    data = load_data()
+    print(f"📁 Loaded {len(data['characters'])} characters")
     
+    # Create application
     application = Application.builder().token(token).build()
     
-    # Commands
+    # Add command handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("play", play))
-    application.add_handler(CommandHandler("add", addcharacter))
+    application.add_handler(CommandHandler("splay", play))
+    application.add_handler(CommandHandler("sadd" , addcharacters))
     application.add_handler(CommandHandler("list", listcharacters))
-    application.add_handler(CommandHandler("debug", debugcmd))
     application.add_handler(CommandHandler("test", testmatch))
+    application.add_handler(CommandHandler("debug", debug))
     
-    # Message handler
+    # Add message handler for guesses (MUST BE LAST!)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check_answer))
     
-    print("✅ Bot starting...")
+    print("✅ Bot is running...")
     application.run_polling(allowed_updates=None)
 
 if __name__ == '__main__':
