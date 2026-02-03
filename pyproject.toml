@@ -1,14 +1,18 @@
 [tool.poetry]
-name = "telegram-bot-python"
-version = "0.1.0"
-description = ""
-authors = ["aeither <36173828+aeither@users.noreply.github.com>"]
-readme = "README.md"
+name = "sukuna-nguess-bot"
+version = "1.0.0"
+description = "Telegram anime character guessing game bot"
+authors = ["egoist <jayeshpatil8him@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.11"
-pytelegrambotapi = "^4.21.0"
-python-dotenv = "^1.0.1"
+python = "^3.9"
+python-telegram-bot = "^20.6"
+requests = "^2.31.0"
+Pillow = "^10.0.0"
+aiohttp = "^3.9.0"
+python-dotenv = "^1.0.0"
+
+[tool.poetry.group.dev.dependencies]
 
 [build-system]
 requires = ["poetry-core"]
