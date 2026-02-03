@@ -244,8 +244,8 @@ def check_guess(user_guess, correct_name):
     return user_guess.strip().lower() == correct_name.strip().lower()
 
 # =============== COMMAND HANDLERS ===============
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITHOUT 's'
-    """Start command - WITHOUT 's' prefix"""
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start command - WITHOUT 's'"""
     user = update.effective_user
     user_data = get_user(user.id)
     
@@ -268,8 +268,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITHOUT 
         parse_mode="HTML"
     )
 
-async def splay(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
-    """Start a new game - WITH 's' prefix"""
+async def splay(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start a new game - WITH 's'"""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     
@@ -334,6 +334,20 @@ async def splay(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
         user_data['current_strike'] = 0
         update_user(user_data)
         end_game(chat_id)
+
+# =============== MESSAGE HANDLER ===============
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle ALL incoming messages"""
+    # Check if message is a command
+    if update.message and update.message.text:
+        text = update.message.text
+        
+        # If it starts with '/', it's a command - let command handlers handle it
+        if text.startswith('/'):
+            return  # Let CommandHandler handle it
+        
+        # Otherwise, it's a guess - handle it here
+        await handle_guess(update, context)
 
 async def handle_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle user's guess"""
@@ -414,8 +428,8 @@ async def handle_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-async def sprofile(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
-    """Show user profile - WITH 's' prefix"""
+async def sprofile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show user profile - WITH 's'"""
     user_id = update.effective_user.id
     user_data = get_user(user_id)
     
@@ -435,8 +449,8 @@ async def sprofile(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 
         parse_mode="HTML"
     )
 
-async def sleaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
-    """Show leaderboard - WITH 's' prefix"""
+async def sleaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show leaderboard - WITH 's'"""
     conn = sqlite3.connect('anime_bot.db')
     cursor = conn.cursor()
     
@@ -468,8 +482,8 @@ async def sleaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):  # W
     
     await update.message.reply_text(leaderboard, parse_mode="HTML")
 
-async def sadd(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
-    """Add new character - WITH 's' prefix"""
+async def sadd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add new character - WITH 's'"""
     if not context.args:
         await update.message.reply_text("Reply to image: /sadd <character name>")
         return
@@ -505,8 +519,8 @@ async def sadd(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
     else:
         await update.message.reply_text("⚠️ Character already exists!")
 
-async def slist(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
-    """List all characters - WITH 's' prefix"""
+async def slist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all characters - WITH 's'"""
     characters = get_all_characters()
     
     if not characters:
@@ -522,8 +536,8 @@ async def slist(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
     
     await update.message.reply_text(text, parse_mode="HTML")
 
-async def sdebug(update: Update, context: ContextTypes.DEFAULT_TYPE):  # WITH 's'
-    """Debug info - WITH 's' prefix"""
+async def sdebug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Debug info - WITH 's'"""
     chat_id = update.effective_chat.id
     active_game = get_active_game(chat_id)
     
@@ -577,11 +591,15 @@ def main():
     application.add_handler(CommandHandler("slist", slist))  # WITH 's'
     application.add_handler(CommandHandler("sdebug", sdebug))  # WITH 's'
     
-    # Add message handler for guesses
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_guess))
+    # =============== FIXED MESSAGE HANDLER ===============
+    # Add message handler to catch ALL non-command messages
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND, 
+        handle_message
+    ))
     
-    print("✅ Bot is running...")
-    application.run_polling(allowed_updates=None)
+    print("✅ Bot is running with proper message handler...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
