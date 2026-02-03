@@ -1,66 +1,32 @@
-## Telegram Python Bot
+# Anime NGuess Bot 🎮
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/a0ln90?referralCode=CODE)
+A Telegram bot where players guess anime characters from images within 15 seconds!
 
-## Overview
-
-This project is a simple Telegram bot built using the telebot library. It demonstrates the basic structure of a Telegram bot and uses Poetry for dependency management. The bot responds to commands and messages, and can be easily extended with additional functionality.
-
-## Key Features
-
-- Minimal Telegram bot application
-- Responds to '/start' and '/hello' commands
-- Echoes all other messages
-- Uses telebot for bot functionality
-- Uses Poetry for dependency management
-- Easy to understand and extend
+## Features
+- Guess anime characters from images
+- 15-second time limit per round
+- Strike system (consecutive correct guesses)
+- Score tracking
 
 ## Setup
 
-```bash
-pip install poetry
-poetry install
-```
+1. Clone the repository
+2. Install dependencies: `poetry install`
+3. Copy `.env.example` to `.env` and add your BOT_TOKEN
+4. Run: `python main.py`
 
-## Develop
+## Deployment on Railway
 
-To run the bot locally:
+1. Push to GitHub
+2. Create Railway project
+3. Connect GitHub repository
+4. Add environment variable `BOT_TOKEN`
+5. Deploy!
 
-```bash
-poetry run python -B main.py
-```
-
-Make sure to set up your `.env` file with your Telegram bot token:
-
-```bash
-TELEGRAM_BOT_TOKEN=your_token_here
-```
-
-## Deploy
-
-Initialize your project:
-
-```bash
-railway init
-```
-
-To deploy the bot on Railway:
-
-```bash
-railway up
-```
-
-Remember to set the `TELEGRAM_BOT_TOKEN` environment variable in your Railway project settings.TELEGRAM_BOT_TOKEN
-
-## Test
-
-Open Telegram, start a chat with your bot, and try the commands `/start` or `/hello`. The bot will also echo any other messages you send.
-
-## Learn More
-
-- [Telebot Documentation](https://pypi.org/project/pyTelegramBotAPI/)
-- [Poetry Documentation](https://python-poetry.org/docs/)
-- [Telegram Bot API](https://core.telegram.org/bots/api)
-- [Railway Documentation](https://docs.railway.app/)
-- [Telegram Python Bot Repository](https://github.com/aeither/telegram-bot-python/)
-- [Railway Marketplace](https://railway.app/template/a0ln90)
+## Commands
+- `/start` - Start the bot
+- `/nguess` or `/play` - Start a new game
+- `/score` - Check your score
+- `/stop` - Stop current game
+- `/leaderboard` - Global leaderboard
+- `/cupload` (Owner only) - Upload new character
