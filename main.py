@@ -328,8 +328,8 @@ def main() -> None:
     
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("splay", play))
-    application.add_handler(CommandHandler("sadd" , addcharacters))
+    application.add_handler(CommandHandler("play", play))
+    application.add_handler(CommandHandler("add", addcharacter))
     application.add_handler(CommandHandler("list", listcharacters))
     application.add_handler(CommandHandler("test", testmatch))
     application.add_handler(CommandHandler("debug", debug))
