@@ -4,8 +4,6 @@ import json
 import random
 import asyncio
 import logging
-import re
-import time
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
@@ -24,529 +22,400 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-logger = logging.getLogger(__name__)
 
-# ================= GAME VARIABLES =================
-current_game = None  # Store current game
-user_data = {}       # Store user progress
-# ==================================================
+# ================= SIMPLE GAME STORAGE =================
+# Store only ONE game per chat
+active_games = {}
+user_stats = {}
+# ======================================================
 
 # -------- DATA HELPERS --------
-def load_game_data():
-    """Load characters data"""
+def load_characters():
     try:
-        with open("data.json", "r", encoding="utf-8") as f:
-            return json.load(f)
+        with open("characters.json", "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if not isinstance(data, list):
+                return []
+            return data
     except:
-        return {"characters": []}
+        return []
 
-def save_game_data(data):
-    with open("data.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+def save_characters(characters):
+    with open("characters.json", "w", encoding="utf-8") as f:
+        json.dump(characters, f, indent=2, ensure_ascii=False)
 
-def load_user_data():
-    """Load user data"""
+def load_users():
     try:
         with open("users.json", "r", encoding="utf-8") as f:
             return json.load(f)
     except:
         return {}
 
-def save_user_data(data):
+def save_users(users):
     with open("users.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(users, f, indent=2, ensure_ascii=False)
 
-# -------- COIN SYSTEM --------
-def calculate_coins(strike):
-    """Calculate coins earned based on strike"""
-    base_coins = 20
-    
-    # Special milestone bonuses
-    if strike == 10:
-        return 200
-    elif strike == 25:
-        return 500
-    elif strike == 50:
-        return 1000
-    elif strike == 59:
-        return 1000
-    elif strike == 75:
-        return 1200
-    elif strike == 100:
-        return 1500
-    elif strike % 10 == 0:  # Every 10th strike bonus
-        return base_coins * 5
-    else:
-        return base_coins
+# -------- SIMPLE MATCHING --------
+def check_guess(guess, answer):
+    """Exact matching - SIMPLE AND RELIABLE"""
+    return guess.strip().lower() == answer.strip().lower()
 
-def get_milestone_bonus(strike):
-    """Get special milestone message"""
-    bonuses = {
-        10: "🎉 10-STRIKE BONUS! +200 coins!",
-        25: "🌟 25-STRIKE BONUS! +500 coins!",
-        50: "✨ 50-STRIKE BONUS! +1000 coins!",
-        59: "🔥 59-STRIKE SPECIAL! +1000 coins!",
-        75: "💎 75-STRIKE BONUS! +1200 coins!",
-        100: "🏆 100-STRIKE LEGEND! +1500 coins!"
-    }
-    return bonuses.get(strike, "")
-
-# -------- MATCHING SYSTEM --------
-def is_correct_guess(user_input, correct_name):
-    """Flexible matching system"""
-    user_clean = user_input.lower().strip()
-    correct_clean = correct_name.lower().strip()
-    
-    # Remove punctuation
-    user_clean = re.sub(r'[^\w\s]', '', user_clean)
-    correct_clean = re.sub(r'[^\w\s]', '', correct_clean)
-    
-    # Exact match
-    if user_clean == correct_clean:
-        return True
-    
-    # Word-by-word matching
-    user_words = set(user_clean.split())
-    correct_words = set(correct_clean.split())
-    
-    # If any word matches
-    if user_words & correct_words:
-        return True
-    
-    # Common nickname mapping
-    nicknames = {
-        'naruto': ['naruto uzumaki'],
-        'sasuke': ['sasuke uchiha'],
-        'luffy': ['monkey d luffy'],
-        'zoro': ['roronoa zoro'],
-        'light': ['light yagami'],
-        'eren': ['eren yeager'],
-        'levi': ['levi ackerman'],
-        'yae': ['yae miko'],
-        'miko': ['yae miko'],
-        # Add more as needed
-    }
-    
-    # Check nicknames
-    for nick, full_names in nicknames.items():
-        if user_clean == nick and correct_clean in full_names:
-            return True
-    
-    return False
-
-# -------- COMMAND HANDLERS --------
+# -------- COMMANDS --------
 async def sstart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command with 's' prefix"""
     user = update.effective_user
     user_id = str(user.id)
     
-    # Load user data
-    global user_data
-    user_data = load_user_data()
+    # Load user stats
+    global user_stats
+    user_stats = load_users()
     
-    # Initialize user if new
-    if user_id not in user_data:
-        user_data[user_id] = {
-            "username": user.username or user.first_name,
+    if user_id not in user_stats:
+        user_stats[user_id] = {
+            "name": user.first_name,
             "coins": 0,
-            "total_correct": 0,
+            "strike": 0,
             "best_strike": 0,
-            "current_strike": 0,
-            "games_played": 0
+            "correct": 0
         }
-        save_user_data(user_data)
+        save_users(user_stats)
     
-    stats = user_data[user_id]
+    stats = user_stats[user_id]
     
     await update.message.reply_text(
-        f"✨ Welcome {user.first_name} to Anime NGuess! ✨\n\n"
-        f"💰 <b>Your Coins:</b> {stats['coins']}\n"
-        f"🔥 <b>Current Strike:</b> {stats['current_strike']}\n"
-        f"🏆 <b>Best Strike:</b> {stats['best_strike']}\n"
-        f"✅ <b>Correct Answers:</b> {stats['total_correct']}\n\n"
-        
-        "🎮 <b>How to Play:</b>\n"
-        "1. Use /splay to start game\n"
-        "2. Guess the anime character\n"
-        "3. Earn coins and build your strike!\n\n"
-        
-        "💰 <b>Coin System:</b>\n"
-        "• +20 coins per correct answer\n"
-        "• Special bonuses at milestones!\n\n"
-        
-        "📜 <b>Commands:</b>\n"
-        "/splay - Start new game\n"
-        "/sprofile - Check your stats\n"
-        "/sleaderboard - Top players\n"
-        "/sadd - Add character (Owner)\n"
-        "/slist - List all characters\n"
-        "/sshop - View shop (Coming Soon)\n",
-        parse_mode="HTML"
+        f"✨ Welcome to Anime Guess! ✨\n\n"
+        f"💰 Coins: {stats['coins']}\n"
+        f"🔥 Current Strike: {stats['strike']}\n"
+        f"🏆 Best Strike: {stats['best_strike']}\n\n"
+        f"🎮 /splay - Start game (30 seconds)\n"
+        f"📊 /sstats - Your stats\n"
+        f"🏆 /stop - Leaderboard\n"
+        f"➕ /sadd - Add character\n"
+        f"📋 /slist - List characters"
     )
 
 async def splay(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start new game"""
-    global current_game, user_data
+    chat_id = update.effective_chat.id
+    user_id = str(update.effective_user.id)
     
-    # Check if game already running
-    if current_game:
-        await update.message.reply_text("⚠️ A game is already running! Guess the character.")
+    print(f"\n🔸 /splay called by {user_id} in chat {chat_id}")
+    
+    # Check if game already active
+    if chat_id in active_games:
+        print(f"❌ Game already active in chat {chat_id}")
+        await update.message.reply_text("Game already running! Guess or wait.")
         return
     
     # Load characters
-    data = load_game_data()
-    if not data.get("characters"):
-        await update.message.reply_text("❌ No characters added yet!")
+    characters = load_characters()
+    if not characters:
+        await update.message.reply_text("No characters! Add with /sadd")
         return
     
     # Pick random character
-    character = random.choice(data["characters"])
+    character = random.choice(characters)
+    print(f"✅ Selected: '{character['name']}'")
     
-    # Load user data
-    user_data = load_user_data()
-    user_id = str(update.effective_user.id)
-    
-    # Initialize user if new
-    if user_id not in user_data:
-        user_data[user_id] = {
-            "username": update.effective_user.username or update.effective_user.first_name,
+    # Load user stats
+    global user_stats
+    user_stats = load_users()
+    if user_id not in user_stats:
+        user_stats[user_id] = {
+            "name": update.effective_user.first_name,
             "coins": 0,
-            "total_correct": 0,
+            "strike": 0,
             "best_strike": 0,
-            "current_strike": 0,
-            "games_played": 0
+            "correct": 0
         }
     
-    # Start game
-    current_game = {
+    # Store game
+    active_games[chat_id] = {
         "answer": character["name"],
-        "chat_id": update.effective_chat.id,
         "user_id": user_id,
-        "start_time": time.time()
+        "image": character["image"],
+        "timestamp": asyncio.get_event_loop().time()
     }
     
-    print(f"\n🎮 Game Started:")
-    print(f"Answer: {character['name']}")
-    print(f"User: {user_id}")
-    print(f"Current Strike: {user_data[user_id]['current_strike']}")
+    print(f"✅ Game started. Answer: '{character['name']}'")
+    print(f"✅ Active games: {list(active_games.keys())}")
     
-    # Send image WITHOUT revealing answer
+    # Send image
     try:
         await update.message.reply_photo(
             photo=open(character["image"], "rb"),
-            caption=f"🎮 <b>Guess the Anime Character!</b>\n"
-                   f"⏱️ <b>30 seconds</b>\n"
-                   f"🔥 <b>Current Strike:</b> {user_data[user_id]['current_strike']}\n"
-                   f"💰 <b>Next Correct:</b> {calculate_coins(user_data[user_id]['current_strike'] + 1)} coins",
-            parse_mode="HTML"
+            caption=f"🎮 Guess this character!\n⏱️ 30 seconds\n"
+                   f"🔥 Your strike: {user_stats[user_id]['strike']}"
         )
     except Exception as e:
-        await update.message.reply_text(f"❌ Error loading image: {e}")
-        current_game = None
+        print(f"❌ Error sending image: {e}")
+        del active_games[chat_id]
+        await update.message.reply_text("Error loading image!")
         return
     
-    # 30-second timer
+    # Wait 30 seconds
     await asyncio.sleep(30)
     
-    # Check if game still active
-    if current_game and current_game["chat_id"] == update.effective_chat.id:
-        await update.message.reply_text(
-            f"⏰ <b>Time's up!</b>\n"
-            f"The character was: <b>{character['name']}</b>\n"
-            f"❌ Strike reset to 0!",
-            parse_mode="HTML"
+    # Check if game still exists
+    if chat_id in active_games:
+        answer = active_games[chat_id]["answer"]
+        del active_games[chat_id]
+        await context.bot.send_message(
+            chat_id,
+            f"⏰ Time's up! Answer: {answer}\n"
+            f"❌ Strike reset!"
         )
         # Reset strike
-        if user_id in user_data:
-            user_data[user_id]["current_strike"] = 0
-            save_user_data(user_data)
-        current_game = None
+        if user_id in user_stats:
+            user_stats[user_id]["strike"] = 0
+            save_users(user_stats)
 
-async def check_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Check user's guess"""
-    global current_game, user_data
-    
-    if not current_game:
-        return
-    
-    # Check if guess is for current game
-    if current_game["chat_id"] != update.effective_chat.id:
-        return
-    
-    user_guess = update.message.text.strip()
-    correct_answer = current_game["answer"]
+async def handle_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
     user_id = str(update.effective_user.id)
+    guess = update.message.text.strip()
     
-    # Only allow the user who started the game to guess
-    if current_game["user_id"] != user_id:
-        await update.message.reply_text("⚠️ This game was started by someone else!")
+    print(f"\n🔹 Guess received: '{guess}' from {user_id} in chat {chat_id}")
+    print(f"🔹 Active games: {list(active_games.keys())}")
+    
+    # Check if game exists in this chat
+    if chat_id not in active_games:
+        print(f"❌ No active game in chat {chat_id}")
         return
     
-    # Load user data
-    user_data = load_user_data()
-    if user_id not in user_data:
-        user_data[user_id] = {
-            "username": update.effective_user.username or update.effective_user.first_name,
-            "coins": 0,
-            "total_correct": 0,
-            "best_strike": 0,
-            "current_strike": 0,
-            "games_played": 0
-        }
+    game = active_games[chat_id]
     
-    # Check if guess is correct
-    if is_correct_guess(user_guess, correct_answer):
-        # Update user stats
-        user_data[user_id]["total_correct"] += 1
-        user_data[user_id]["games_played"] += 1
+    # Check if correct user
+    if game["user_id"] != user_id:
+        print(f"❌ Wrong user. Game belongs to {game['user_id']}")
+        await update.message.reply_text("This game was started by someone else!")
+        return
+    
+    answer = game["answer"]
+    print(f"✅ Game found! Answer: '{answer}'")
+    
+    # Check guess
+    if check_guess(guess, answer):
+        print(f"✅ CORRECT! '{guess}' == '{answer}'")
         
-        # Calculate new strike and coins
-        new_strike = user_data[user_id]["current_strike"] + 1
-        coins_earned = calculate_coins(new_strike)
+        # Load user stats
+        global user_stats
+        user_stats = load_users()
         
-        user_data[user_id]["current_strike"] = new_strike
-        user_data[user_id]["coins"] += coins_earned
+        # Update stats
+        if user_id not in user_stats:
+            user_stats[user_id] = {
+                "name": update.effective_user.first_name,
+                "coins": 0,
+                "strike": 0,
+                "best_strike": 0,
+                "correct": 0
+            }
         
-        # Update best strike
-        if new_strike > user_data[user_id]["best_strike"]:
-            user_data[user_id]["best_strike"] = new_strike
+        # Calculate coins
+        new_strike = user_stats[user_id]["strike"] + 1
+        coins_earned = 20
         
-        # Save user data
-        save_user_data(user_data)
+        if new_strike == 10:
+            coins_earned = 200
+        elif new_strike == 25:
+            coins_earned = 500
+        elif new_strike == 50:
+            coins_earned = 1000
+        elif new_strike == 59:
+            coins_earned = 1000
+        elif new_strike == 75:
+            coins_earned = 1200
+        elif new_strike == 100:
+            coins_earned = 1500
         
-        # Get milestone message
-        milestone_msg = get_milestone_bonus(new_strike)
+        # Update user
+        user_stats[user_id]["strike"] = new_strike
+        user_stats[user_id]["coins"] += coins_earned
+        user_stats[user_id]["correct"] += 1
+        
+        if new_strike > user_stats[user_id]["best_strike"]:
+            user_stats[user_id]["best_strike"] = new_strike
+        
+        save_users(user_stats)
         
         # Send success message
         await update.message.reply_text(
-            f"✅ <b>Correct!</b> It was <b>{correct_answer}</b>\n\n"
-            f"🔥 <b>Strike:</b> {new_strike}\n"
-            f"💰 <b>+{coins_earned} coins!</b> Total: {user_data[user_id]['coins']}\n"
-            f"{milestone_msg}\n\n"
-            f"🎮 <i>Next character in 3 seconds...</i>",
-            parse_mode="HTML"
+            f"✅ Correct! It was: {answer}\n"
+            f"🔥 New strike: {new_strike}\n"
+            f"💰 +{coins_earned} coins!\n"
+            f"💵 Total: {user_stats[user_id]['coins']}\n\n"
+            f"Next round in 3 seconds..."
         )
         
-        # End current game
-        current_game = None
+        # Remove game
+        del active_games[chat_id]
         
-        # Start next round after delay
+        # Start next round
         await asyncio.sleep(3)
         await splay(update, context)
+        
     else:
-        # Wrong guess
+        print(f"❌ WRONG! '{guess}' != '{answer}'")
         await update.message.reply_text(
-            f"❌ <b>Wrong guess!</b> Try again.\n"
-            f"💡 Hint: Name has {len(correct_answer.split())} word(s)",
-            parse_mode="HTML"
+            f"❌ Wrong! The answer was: {answer}\n"
+            f"❌ Strike reset to 0!"
         )
+        # Reset strike
+        if user_id in user_stats:
+            user_stats[user_id]["strike"] = 0
+            save_users(user_stats)
+        # Remove game
+        if chat_id in active_games:
+            del active_games[chat_id]
 
-async def sprofile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show user profile"""
+async def sstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
-    user_data = load_user_data()
+    user_stats = load_users()
     
-    if user_id not in user_data:
-        await update.message.reply_text("You haven't played yet! Use /splay to start!")
+    if user_id not in user_stats:
+        await update.message.reply_text("Play first with /splay!")
         return
     
-    stats = user_data[user_id]
+    stats = user_stats[user_id]
     
     await update.message.reply_text(
-        f"👤 <b>Player Profile</b>\n\n"
-        f"🎮 <b>Username:</b> {stats['username']}\n"
-        f"💰 <b>Coins:</b> {stats['coins']}\n"
-        f"🔥 <b>Current Strike:</b> {stats['current_strike']}\n"
-        f"🏆 <b>Best Strike:</b> {stats['best_strike']}\n"
-        f"✅ <b>Correct Answers:</b> {stats['total_correct']}\n"
-        f"🎯 <b>Games Played:</b> {stats['games_played']}\n\n"
-        
-        "🎁 <b>Next Milestones:</b>\n"
-        "• 10 strikes: 200 coins 🎉\n"
-        "• 25 strikes: 500 coins 🌟\n"
-        "• 50 strikes: 1000 coins ✨\n"
-        "• 59 strikes: 1000 coins 🔥\n"
-        "• 75 strikes: 1200 coins 💎\n"
-        "• 100 strikes: 1500 coins 🏆",
-        parse_mode="HTML"
+        f"📊 Your Stats:\n\n"
+        f"💰 Coins: {stats['coins']}\n"
+        f"🔥 Current Strike: {stats['strike']}\n"
+        f"🏆 Best Strike: {stats['best_strike']}\n"
+        f"✅ Correct Answers: {stats['correct']}"
     )
 
-async def sleaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show leaderboard"""
-    user_data = load_user_data()
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_stats = load_users()
     
-    if not user_data:
-        await update.message.reply_text("📊 No players yet! Be the first!")
+    if not user_stats:
+        await update.message.reply_text("No players yet!")
         return
     
     # Sort by coins
-    sorted_users = sorted(
-        user_data.items(),
+    top_users = sorted(
+        user_stats.items(),
         key=lambda x: x[1]["coins"],
         reverse=True
     )[:10]
     
-    leaderboard_text = "🏆 <b>Top 10 Players (by coins)</b>\n\n"
+    leaderboard = "🏆 Top Players:\n\n"
+    for i, (uid, stats) in enumerate(top_users, 1):
+        leaderboard += f"{i}. {stats['name']}\n"
+        leaderboard += f"   💰 {stats['coins']} coins | 🔥 {stats['best_strike']}\n\n"
     
-    for i, (user_id, data) in enumerate(sorted_users, 1):
-        medal = ["🥇", "🥈", "🥉"][i-1] if i <= 3 else f"{i}."
-        username = data["username"][:15]
-        
-        leaderboard_text += (
-            f"{medal} <b>{username}</b>\n"
-            f"   💰 {data['coins']} coins | "
-            f"🔥 {data['best_strike']} strikes\n\n"
-        )
-    
-    await update.message.reply_text(leaderboard_text, parse_mode="HTML")
+    await update.message.reply_text(leaderboard)
 
 async def sadd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Add new character (Owner only)"""
-    OWNER_ID = os.getenv("OWNER_ID")
-    
-    if not OWNER_ID or str(update.effective_user.id) != OWNER_ID:
-        await update.message.reply_text("❌ Owner only command!")
-        return
-    
+    """Add character - SIMPLE VERSION"""
     if not context.args:
-        await update.message.reply_text("Usage: Reply to image with /sadd <name>")
+        await update.message.reply_text("Reply to image: /sadd <name>")
         return
     
     if not update.message.reply_to_message or not update.message.reply_to_message.photo:
-        await update.message.reply_text("❌ Reply to an image!")
+        await update.message.reply_text("Reply to an image!")
         return
     
     char_name = " ".join(context.args).strip()
     
-    # Create images directory
+    # Create images folder
     os.makedirs("images", exist_ok=True)
     
     # Download image
     photo = update.message.reply_to_message.photo[-1]
     file = await photo.get_file()
     
-    # Create safe filename
-    safe_name = char_name.lower()
-    safe_name = re.sub(r'[^\w\s]', '', safe_name)  # Remove punctuation
-    safe_name = safe_name.replace(" ", "_")
+    # Save image
+    safe_name = char_name.lower().replace(" ", "_").replace(".", "")
     image_path = f"images/{safe_name}.jpg"
-    
     await file.download_to_drive(image_path)
     
-    # Load existing data
-    data = load_game_data()
+    # Load characters
+    characters = load_characters()
     
-    # Check for duplicates (case-insensitive)
-    for char in data["characters"]:
+    # Check if exists
+    for char in characters:
         if char["name"].lower() == char_name.lower():
-            await update.message.reply_text("⚠️ Character already exists!")
+            await update.message.reply_text("Already exists!")
             return
     
-    # Add new character
-    data["characters"].append({
+    # Add character
+    characters.append({
         "name": char_name,
         "image": image_path
     })
     
-    save_game_data(data)
+    save_characters(characters)
     
     await update.message.reply_text(
-        f"✅ <b>Character Added!</b>\n"
-        f"🎮 <b>Name:</b> {char_name}\n"
-        f"📁 <b>File:</b> {image_path}\n"
-        f"📊 <b>Total Characters:</b> {len(data['characters'])}",
-        parse_mode="HTML"
+        f"✅ Added: {char_name}\n"
+        f"Total: {len(characters)} characters"
     )
 
 async def slist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List all characters"""
-    data = load_game_data()
+    characters = load_characters()
     
-    if not data.get("characters"):
-        await update.message.reply_text("❌ No characters yet!")
+    if not characters:
+        await update.message.reply_text("No characters!")
         return
     
-    text = f"📋 <b>Total Characters: {len(data['characters'])}</b>\n\n"
+    text = f"📋 Characters ({len(characters)}):\n\n"
+    for char in characters:
+        text += f"• {char['name']}\n"
     
-    # Group by first letter
-    chars_by_letter = {}
-    for char in data["characters"]:
-        first_letter = char["name"][0].upper()
-        if first_letter not in chars_by_letter:
-            chars_by_letter[first_letter] = []
-        chars_by_letter[first_letter].append(char["name"])
-    
-    for letter in sorted(chars_by_letter.keys()):
-        text += f"<b>{letter}</b>\n"
-        for name in sorted(chars_by_letter[letter]):
-            text += f"• {name}\n"
-        text += "\n"
-    
-    # Telegram has 4096 char limit
     if len(text) > 4000:
-        text = text[:4000] + "\n... (truncated)"
+        text = text[:4000] + "\n..."
     
-    await update.message.reply_text(text, parse_mode="HTML")
+    await update.message.reply_text(text)
 
-async def sshop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Shop placeholder"""
-    await update.message.reply_text(
-        "🛒 <b>Shop System (Coming Soon!)</b>\n\n"
-        "🎁 Features in development:\n"
-        "• Buy profile badges\n"
-        "• Unlock special characters\n"
-        "• Purchase hints\n"
-        "• Custom themes\n\n"
-        "Stay tuned for updates! 💫",
-        parse_mode="HTML"
-    )
-
-async def sreset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Reset user strike (for testing)"""
-    user_id = str(update.effective_user.id)
-    user_data = load_user_data()
+async def sdebug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Debug command"""
+    chat_id = update.effective_chat.id
     
-    if user_id in user_data:
-        user_data[user_id]["current_strike"] = 0
-        save_user_data(user_data)
-        await update.message.reply_text("🔥 Strike reset to 0!")
+    debug_info = f"🔧 Debug Info:\n"
+    debug_info += f"Active games: {len(active_games)}\n"
+    
+    if chat_id in active_games:
+        game = active_games[chat_id]
+        debug_info += f"Current answer: '{game['answer']}'\n"
+        debug_info += f"Started by: {game['user_id']}\n"
+        debug_info += f"Image: {game['image']}"
     else:
-        await update.message.reply_text("You haven't played yet!")
+        debug_info += "No active game in this chat"
+    
+    await update.message.reply_text(debug_info)
 
 def main():
-    """Start the bot"""
     token = os.getenv("BOT_TOKEN")
     if not token:
-        print("❌ BOT_TOKEN not set!")
+        print("❌ No BOT_TOKEN!")
         return
     
-    print("🚀 Anime NGuess Bot Starting...")
+    print("🚀 Starting Anime Guess Bot...")
+    print(f"Token: {token[:10]}...")
     
-    # Load data at startup
-    game_data = load_game_data()
-    user_data = load_user_data()
+    # Load initial data
+    chars = load_characters()
+    users = load_users()
+    print(f"Loaded {len(chars)} characters, {len(users)} users")
     
-    print(f"📁 Characters loaded: {len(game_data.get('characters', []))}")
-    print(f"👥 Users loaded: {len(user_data)}")
+    # Create app
+    app = Application.builder().token(token).build()
     
-    # Create application
-    application = Application.builder().token(token).build()
+    # Add handlers
+    app.add_handler(CommandHandler("sstart", sstart))
+    app.add_handler(CommandHandler("splay", splay))
+    app.add_handler(CommandHandler("sstats", sstats))
+    app.add_handler(CommandHandler("stop", stop))
+    app.add_handler(CommandHandler("sadd", sadd))
+    app.add_handler(CommandHandler("slist", slist))
+    app.add_handler(CommandHandler("sdebug", sdebug))
     
-    # Add command handlers (all start with 's')
-    application.add_handler(CommandHandler("sstart", sstart))
-    application.add_handler(CommandHandler("splay", splay))
-    application.add_handler(CommandHandler("sprofile", sprofile))
-    application.add_handler(CommandHandler("sleaderboard", sleaderboard))
-    application.add_handler(CommandHandler("sadd", sadd))
-    application.add_handler(CommandHandler("slist", slist))
-    application.add_handler(CommandHandler("sshop", sshop))
-    application.add_handler(CommandHandler("sreset", sreset))
+    # Add message handler (MUST BE LAST!)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_guess))
     
-    # Add message handler for guesses
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check_guess))
-    
-    print("✅ Bot is running...")
-    application.run_polling()
+    print("✅ Bot is running. Press Ctrl+C to stop.")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
