@@ -1,2 +1,6 @@
-# This variable is not used in the project. Please copy and use it as an environment variable as described in the README.
-TELEGRAM_BOT_TOKEN=8464370713:AAEB6sOM3pJvBinF09M4vpYuVxrQcM4pFjs
+# Copy this to .env file and fill your values
+BOT_TOKEN=8464370713:AAEB6sOM3pJvBinF09M4vpYuVxrQcM4pFjs
+OWNER_ID=7676723107
+MAX_STRIKES=50
+TIME_LIMIT=15
+DEBUG=True
